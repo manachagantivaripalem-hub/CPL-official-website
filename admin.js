@@ -1,0 +1,21 @@
+const $=s=>document.querySelector(s); const cfg=window.CPL_CONFIG||{};
+const configured=window.supabase&&cfg.supabaseUrl&&!cfg.supabaseUrl.startsWith("YOUR_")&&cfg.supabaseAnonKey&&!cfg.supabaseAnonKey.startsWith("YOUR_");
+if(!configured) $("#setupNotice").hidden=false;
+const db=configured?window.supabase.createClient(cfg.supabaseUrl,cfg.supabaseAnonKey):null;
+const msg=(s)=>$("#loginMessage").textContent=s;
+async function refresh(){
+ const [t,m,p,l]=await Promise.all([db.from("teams").select("*").order("name"),db.from("matches").select("*").order("match_time",{ascending:false}),db.from("points_table").select("*").order("points",{ascending:false}),db.from("live_scores").select("*").order("updated_at",{ascending:false})]);
+ $("#teamAdminList").innerHTML=(t.data||[]).map(x=>`<div>${x.name} <button data-del-team="${x.id}" class="mini-del">Delete</button></div>`).join("");
+ $("#matchAdminList").innerHTML=(m.data||[]).map(x=>`<div>${x.team1} vs ${x.team2} · ${x.status} <button data-del-match="${x.id}" class="mini-del">Delete</button></div>`).join("");
+ $("#pointsAdminList").innerHTML=(p.data||[]).map(x=>`<div>${x.team_name}: ${x.points} pts <button data-del-points="${x.id}" class="mini-del">Delete</button></div>`).join("");
+ $("#liveAdminList").innerHTML=(l.data||[]).map(x=>`<div>${x.match_title}: ${x.runs}/${x.wickets} (${x.overs}) · ${x.status} <button data-del-live="${x.id}" class="mini-del">Delete</button></div>`).join("");
+}
+async function showSession(){if(!db)return;const {data}=await db.auth.getSession();const ok=!!data.session;$("#loginPanel").hidden=ok;$("#dashboard").hidden=!ok;if(ok)refresh();}
+if(db) showSession();
+$("#loginForm").addEventListener("submit",async e=>{e.preventDefault();if(!db)return msg("Configure Supabase first (see README.md).");const {error}=await db.auth.signInWithPassword({email:$("#email").value,password:$("#password").value});if(error)msg(error.message);else showSession();});
+$("#logout").addEventListener("click",async()=>{await db.auth.signOut();showSession();});
+$("#teamForm").addEventListener("submit",async e=>{e.preventDefault();const {error}=await db.from("teams").insert({name:$("#teamName").value.trim(),short_name:$("#teamShort").value.trim()});if(error)alert(error.message);else{e.target.reset();refresh();}});
+$("#matchForm").addEventListener("submit",async e=>{e.preventDefault();const row={team1:$("#team1").value.trim(),team2:$("#team2").value.trim(),match_time:new Date($("#matchDate").value).toISOString(),venue:$("#venue").value.trim(),status:$("#status").value,result:$("#result").value.trim()};const {error}=await db.from("matches").insert(row);if(error)alert(error.message);else{e.target.reset();$("#venue").value="Chagantivaripalem";refresh();}});
+$("#liveForm").addEventListener("submit",async e=>{e.preventDefault();const row={match_title:$("#liveTitle").value.trim(),batting_team:$("#battingTeam").value.trim(),runs:+$("#runs").value,wickets:+$("#wickets").value,overs:$("#overs").value.trim(),target:$("#target").value===""?null:+$("#target").value,status:$("#liveStatus").value,run_rate:$("#runRate").value.trim(),note:$("#liveNote").value.trim()};const {error}=await db.from("live_scores").insert(row);if(error)alert(error.message);else{e.target.reset();$("#runs").value=0;$("#wickets").value=0;$("#overs").value="0.0";refresh();}});
+$("#pointsForm").addEventListener("submit",async e=>{e.preventDefault();const row={team_name:$("#pTeam").value.trim(),played:+$("#pPlayed").value,won:+$("#pWon").value,lost:+$("#pLost").value,points:+$("#pPts").value};const {error}=await db.from("points_table").upsert(row,{onConflict:"team_name"});if(error)alert(error.message);else{e.target.reset();refresh();}});
+document.addEventListener("click",async e=>{if(!db)return;const b=e.target.closest("[data-del-team],[data-del-match],[data-del-points],[data-del-live]");if(!b)return;if(!confirm("Delete this item?"))return;let table,id;if(b.dataset.delTeam){table="teams";id=b.dataset.delTeam;}else if(b.dataset.delMatch){table="matches";id=b.dataset.delMatch;}else if(b.dataset.delPoints){table="points_table";id=b.dataset.delPoints;}else{table="live_scores";id=b.dataset.delLive;}const {error}=await db.from(table).delete().eq("id",id);if(error)alert(error.message);else refresh();});
